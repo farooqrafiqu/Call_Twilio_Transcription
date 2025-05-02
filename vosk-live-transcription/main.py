@@ -5,7 +5,6 @@ from threading import Thread
 from dotenv import load_dotenv
 from flask import Flask, has_request_context, request, Response, jsonify, current_app
 from flask_sock import Sock
-from pyngrok import ngrok
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Start, Stream, Dial
 import vosk                                   # optional live ASR
@@ -16,7 +15,6 @@ from twilio.jwt.access_token.grants import VoiceGrant
 # ──────────────── configuration ────────────────
 load_dotenv()
 AUDIO_ROOT = Path("captures"); AUDIO_ROOT.mkdir(exist_ok=True)
-
 TWILIO_SID        = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN      = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM       = os.getenv("TWILIO_NUMBER")        # your verified/outbound number
