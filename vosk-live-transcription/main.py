@@ -203,7 +203,6 @@ def ulaw8k_to_pcm16k(ulaw_bytes: bytes) -> bytes:
 
 # ─────────────── app launch ──────────────────────
 if __name__ == "__main__":
-    # app.run("0.0.0.0", 5000, debug=False)
     # eventlet monkey-patching makes Flask-SocketIO non-blocking
     import eventlet
     import eventlet.wsgi
@@ -213,4 +212,4 @@ if __name__ == "__main__":
     print(f"• public URL → {public_url}")
 
     # One unified server for HTTP + SocketIO + Twilio WS
-    sockio.run(app, host="0.0.0.0", port=5000, log_output=False)
+    sockio.run(app, host="0.0.0.0", port=6000, log_output=False, debug=False)
