@@ -1,0 +1,4 @@
+.env
+_pycache
+app.log
+media.log
