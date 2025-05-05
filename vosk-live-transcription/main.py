@@ -1,3 +1,6 @@
+# ─── MUST MONKEY-PATCH BEFORE OTHER IMPORTS ────────────────────────────────
+import eventlet
+eventlet.monkey_patch()
 
 import os
 import io
@@ -6,9 +9,10 @@ import time
 import base64
 import wave
 import logging
-
+import gc
 from pathlib import Path
 from queue import Queue
+from threading import Thread
 
 from flask import Flask, request, Response, jsonify
 from flask_sock import Sock
@@ -31,9 +35,13 @@ else:
     import numpy as np
     from scipy.signal import resample_poly
 
-# ──────────────── configuration ────────────────
+# ──────────────── configuration ───────────────────────────────────────────
 from dotenv import load_dotenv
 load_dotenv()
+
+# enable GC and tune thresholds if you like
+gc.enable()
+gc.set_threshold(700, 10, 10)
 
 AUDIO_ROOT = Path("captures")
 AUDIO_ROOT.mkdir(exist_ok=True)
@@ -47,7 +55,7 @@ PUBLIC_URL    = os.getenv("PUBLIC_URL")
 # Twilio client
 twilio = Client(TWILIO_SID, TWILIO_TOKEN)
 
-# ──────────── logging: console + rotating file ──────────
+# ──────────── logging: console + rotating file ─────────────────────────────
 logger = logging.getLogger("media")
 logger.setLevel(logging.INFO)
 
@@ -66,7 +74,7 @@ def log_event(evt: str, extra: dict | None = None):
     for h in logger.handlers:
         h.flush()
 
-# ─────────── ASR / transcript events & SILENCE FLUSH ───────────
+# ─────────── ASR / transcript events & SILENCE FLUSH ───────────────────────
 SAMPLE_RATE_IN        = 8000
 SAMPLE_RATE_OUT       = 16000
 SILENCE_FLUSH_SECS    = 3
@@ -81,7 +89,7 @@ MODEL = vosk.Model("model") if Path("model").is_dir() else None
 rec_pool: dict[str, dict[str, vosk.KaldiRecognizer]] = {}
 last_log_ts: dict[str, float] = {}
 
-# ───────────── Flask + SocketIO + Sock setup ─────────────
+# ───────────── Flask + SocketIO + Sock setup ─────────────────────────────
 app    = Flask(__name__)
 sock   = Sock(app)
 sockio = SocketIO(app, cors_allowed_origins="*")
@@ -128,7 +136,7 @@ def voice():
     vr.pause(length=600)
     return Response(str(vr), mimetype="application/xml")
 
-# ───────────── media conversion helpers ─────────────
+# ───────────── media conversion helpers ──────────────────────────────────
 if USE_PYDUB:
     def ulaw8k_to_pcm16k(ulaw_bytes: bytes) -> bytes:
         audio = AudioSegment.from_file(
@@ -166,7 +174,7 @@ else:
             wf.setframerate(rate_in)
             wf.writeframes(pcm.tobytes())
 
-# ───────────── WebSocket media sink ─────────────
+# ───────────── WebSocket media sink ──────────────────────────────────────
 @sock.route("/stream")
 def stream(ws):
     sid = None
@@ -221,10 +229,17 @@ def stream(ws):
 
         elif evt == "stop":
             if MODEL:
+                # flush any remaining speech
                 for s in ("in", "out"):
                     txt = json.loads(rec_pool[sid][s].FinalResult())["text"]
                     if txt:
                         log_event("final", {"sid": sid, "side": s, "txt": txt})
+
+            # teardown recognizers and force GC
+            del rec_pool[sid]
+            collected = gc.collect()
+            log_event("gc_collected", {"sid": sid, "collected": collected})
+
             log_event("ws_stop", {"sid": sid})
             break
 
@@ -239,9 +254,16 @@ def stream(ws):
 
     ws.close()
 
-# ───────────── run app ─────────────
+# ───────────── periodic GC thread ────────────────────────────────────────
+def _periodic_gc():
+    while True:
+        time.sleep(120)
+        collected = gc.collect()
+        log_event("gc_collect_periodic", {"collected": collected})
+
+Thread(target=_periodic_gc, daemon=True).start()
+
+# ───────────── run app ───────────────────────────────────────────────────
 if __name__ == "__main__":
-    import eventlet
-    eventlet.monkey_patch()
     print(f"• public URL → {PUBLIC_URL}")
     sockio.run(app, host="0.0.0.0", port=6000, log_output=False, debug=False)
